@@ -860,3 +860,40 @@ func TestCountJSONLIssues(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateBeadsWorktreeStaleRegistration tests the fix for the "already registered" bug.
+// When the worktree directory is deleted but .git/worktrees/<name> remains,
+// CreateBeadsWorktree should recover by retrying with the -f flag.
+func TestCreateBeadsWorktreeStaleRegistration(t *testing.T) {
+	repoPath, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	wm := NewWorktreeManager(repoPath)
+	branchName := "beads-stale-test"
+	worktreePath := filepath.Join(t.TempDir(), "beads-worktree-stale")
+
+	// Create a worktree normally
+	if err := wm.CreateBeadsWorktree(branchName, worktreePath); err != nil {
+		t.Fatalf("Initial CreateBeadsWorktree failed: %v", err)
+	}
+
+	// Simulate corruption: delete worktree directory but leave .git/worktrees registration
+	if err := os.RemoveAll(worktreePath); err != nil {
+		t.Fatalf("Failed to delete worktree directory: %v", err)
+	}
+
+	// This would fail with "already registered" without the fix
+	if err := wm.CreateBeadsWorktree(branchName, worktreePath); err != nil {
+		t.Errorf("CreateBeadsWorktree should recover from stale registration: %v", err)
+	}
+
+	// Verify worktree was recreated successfully
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Error("Worktree directory should be recreated")
+	}
+
+	valid, err := wm.isValidWorktree(worktreePath)
+	if err != nil || !valid {
+		t.Errorf("Recreated worktree should be valid: valid=%v, err=%v", valid, err)
+	}
+}
