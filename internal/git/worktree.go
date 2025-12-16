@@ -64,7 +64,21 @@ func (wm *WorktreeManager) CreateBeadsWorktree(branch, worktreePath string) erro
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to create worktree: %w\nOutput: %s", err, string(output))
+		// Handle stale worktree registration: if the worktree directory was deleted
+		// but .git/worktrees/<name> still exists, git fails with "already registered".
+		// Retry with -f flag which is safe for beads-sync (internal branch only).
+		if strings.Contains(string(output), "already registered") {
+			if branchExists {
+				cmd = exec.Command("git", "worktree", "add", "-f", "--no-checkout", worktreePath, branch)
+			} else {
+				cmd = exec.Command("git", "worktree", "add", "-f", "--no-checkout", "-b", branch, worktreePath)
+			}
+			cmd.Dir = wm.repoPath
+			output, err = cmd.CombinedOutput()
+		}
+		if err != nil {
+			return fmt.Errorf("failed to create worktree: %w\nOutput: %s", err, string(output))
+		}
 	}
 
 	// Configure sparse checkout to only include .beads/
